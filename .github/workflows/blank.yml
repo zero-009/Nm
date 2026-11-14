@@ -4,99 +4,132 @@ name: Build DNSTT Client ARM64
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
     paths:
-      - ".github/workflows/build-dnstt-arm64.yml"
+      - ".github/workflows/build-dnstt.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
-    name: Compile DNSTT Linux ARM64
-    runs-on: ubuntu-24.04
+    name: Build Linux ARM64
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      # Checkout repository tempat binary akan disimpan
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
+      # Install Go
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.24.4"
           cache: false
 
-      - name: Check Go Version
+      # Download source DNSTT
+      - name: Clone DNSTT source
         run: |
-          go version
+          git clone https://github.com/Mygod/dnstt.git dnstt-source
 
-      - name: Download Official DNSTT Source
-        run: |
-          git clone \
-            https://www.bamsoftware.com/git/dnstt.git \
-            dnstt-source
-
-      - name: Build DNSTT Client ARM64
-        working-directory: dnstt-source/dnstt-client
-        env:
-          GOOS: linux
-          GOARCH: arm64
-          GOARM64: v8.0
-          CGO_ENABLED: 0
+      # Build binary ARM64
+      - name: Build DNSTT Client
         run: |
           set -e
 
-          mkdir -p "$GITHUB_WORKSPACE/dist"
+          mkdir -p dist
 
+          cd dnstt-source/dnstt-client
+
+          GOOS=linux \
+          GOARCH=arm64 \
+          CGO_ENABLED=0 \
           go build \
             -trimpath \
             -ldflags="-s -w" \
-            -o "$GITHUB_WORKSPACE/dist/dnstt-client-linux-arm64" .
+            -o "$GITHUB_WORKSPACE/dist/dnstt-client-linux-arm64" \
+            .
 
+      # Validasi ELF dan arsitektur
       - name: Verify Binary
         run: |
           set -e
 
           BIN="dist/dnstt-client-linux-arm64"
 
-          test -s "$BIN"
-          chmod +x "$BIN"
-
-          echo "=== Binary Information ==="
+          echo "===== FILE INFO ====="
+          ls -lh "$BIN"
           file "$BIN"
 
-          echo "=== Architecture Check ==="
-          readelf -h "$BIN" | grep -E 'Class:|Machine:'
+          echo "===== ELF VALIDATION ====="
 
-          echo "=== Go Build Information ==="
-          go version -m "$BIN"
+          python3 - "$BIN" <<'PY'
+          import sys
+          import struct
 
-          echo "[+] Build ARM64 berhasil."
+          path = sys.argv[1]
 
-      - name: Generate SHA256
+          with open(path, "rb") as f:
+              data = f.read(64)
+
+          if len(data) < 20:
+              raise SystemExit("ERROR: File terlalu kecil")
+
+          if data[:4] != b"\x7fELF":
+              raise SystemExit("ERROR: Bukan file ELF")
+
+          if data[4] != 2:
+              raise SystemExit("ERROR: Bukan ELF 64-bit")
+
+          if data[5] != 1:
+              raise SystemExit("ERROR: Bukan little-endian")
+
+          machine = struct.unpack_from("<H", data, 18)[0]
+
+          if machine != 183:
+              raise SystemExit(
+                  f"ERROR: Arsitektur salah, e_machine={machine}"
+              )
+
+          print("ELF: VALID")
+          print("Architecture: AArch64 / ARM64")
+          PY
+
+          echo "===== SHA256 ====="
+          sha256sum "$BIN"
+
+      # Salin binary ke root repository
+      - name: Copy Binary
         run: |
-          cd dist
-          sha256sum dnstt-client-linux-arm64 > SHA256SUMS
+          cp dist/dnstt-client-linux-arm64 \
+             ./dnstt-client-linux-arm64
 
-      - name: Save Build Information
+      # Simpan binary ke repository agar URL raw bisa digunakan
+      - name: Commit Binary
         run: |
-          {
-            echo "Project: DNSTT"
-            echo "Source: https://www.bamsoftware.com/git/dnstt.git"
-            echo "Architecture: Linux ARM64"
-            echo "GOARM64: v8.0"
-            echo "CGO_ENABLED: 0"
-            echo "Go version: $(go version)"
-            echo "Build date: $(date -u)"
-            echo "Source commit: $(git -C dnstt-source rev-parse HEAD)"
-          } > dist/BUILD-INFO.txt
+          set -e
 
-      - name: Upload Artifact
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add dnstt-client-linux-arm64
+
+          if git diff --cached --quiet; then
+            echo "Binary tidak berubah."
+          else
+            git commit -m "Build DNSTT client Linux ARM64"
+            git push origin HEAD:main
+          fi
+
+      # Simpan juga sebagai artifact
+      - name: Upload Binary Artifact
         uses: actions/upload-artifact@v4
         with:
           name: dnstt-client-linux-arm64
-          path: dist/
+          path: dist/dnstt-client-linux-arm64
           if-no-files-found: error
           retention-days: 30
-          
