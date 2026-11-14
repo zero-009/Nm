@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   build:
-    name: Compile Linux ARM64
+    name: Compile DNSTT Linux ARM64
     runs-on: ubuntu-24.04
 
     steps:
@@ -33,7 +33,7 @@ jobs:
 
       - name: Download Official DNSTT Source
         run: |
-          git clone --depth 1 \
+          git clone \
             https://www.bamsoftware.com/git/dnstt.git \
             dnstt-source
 
@@ -45,6 +45,8 @@ jobs:
           GOARM64: v8.0
           CGO_ENABLED: 0
         run: |
+          set -e
+
           mkdir -p "$GITHUB_WORKSPACE/dist"
 
           go build \
@@ -59,16 +61,18 @@ jobs:
           BIN="dist/dnstt-client-linux-arm64"
 
           test -s "$BIN"
-
           chmod +x "$BIN"
 
+          echo "=== Binary Information ==="
           file "$BIN"
 
-          readelf -h "$BIN" | grep AArch64
+          echo "=== Architecture Check ==="
+          readelf -h "$BIN" | grep -E 'Class:|Machine:'
 
+          echo "=== Go Build Information ==="
           go version -m "$BIN"
 
-          echo "[+] ARM64 binary berhasil dibuat."
+          echo "[+] Build ARM64 berhasil."
 
       - name: Generate SHA256
         run: |
