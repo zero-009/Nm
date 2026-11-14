@@ -1,0 +1,98 @@
+
+name: Build DNSTT Client ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-dnstt-arm64.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compile Linux ARM64
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.4"
+          cache: false
+
+      - name: Check Go Version
+        run: |
+          go version
+
+      - name: Download Official DNSTT Source
+        run: |
+          git clone --depth 1 \
+            https://www.bamsoftware.com/git/dnstt.git \
+            dnstt-source
+
+      - name: Build DNSTT Client ARM64
+        working-directory: dnstt-source/dnstt-client
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          GOARM64: v8.0
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+
+          go build \
+            -trimpath \
+            -ldflags="-s -w" \
+            -o "$GITHUB_WORKSPACE/dist/dnstt-client-linux-arm64" .
+
+      - name: Verify Binary
+        run: |
+          set -e
+
+          BIN="dist/dnstt-client-linux-arm64"
+
+          test -s "$BIN"
+
+          chmod +x "$BIN"
+
+          file "$BIN"
+
+          readelf -h "$BIN" | grep AArch64
+
+          go version -m "$BIN"
+
+          echo "[+] ARM64 binary berhasil dibuat."
+
+      - name: Generate SHA256
+        run: |
+          cd dist
+          sha256sum dnstt-client-linux-arm64 > SHA256SUMS
+
+      - name: Save Build Information
+        run: |
+          {
+            echo "Project: DNSTT"
+            echo "Source: https://www.bamsoftware.com/git/dnstt.git"
+            echo "Architecture: Linux ARM64"
+            echo "GOARM64: v8.0"
+            echo "CGO_ENABLED: 0"
+            echo "Go version: $(go version)"
+            echo "Build date: $(date -u)"
+            echo "Source commit: $(git -C dnstt-source rev-parse HEAD)"
+          } > dist/BUILD-INFO.txt
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dnstt-client-linux-arm64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+          
